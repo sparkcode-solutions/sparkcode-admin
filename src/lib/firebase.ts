@@ -258,8 +258,15 @@ export const addPromotion = async (employeeId: string, promotion: Omit<Promotion
     const employee = employeeSnap.data() as Employee;
     const promotions = employee.promotions || [];
     
+    // Create promotion object with ISO date string instead of serverTimestamp()
+    // Firestore doesn't support serverTimestamp() inside arrays
+    const newPromotion = {
+      ...promotion,
+      createdAt: new Date().toISOString(), // Use ISO string instead of serverTimestamp()
+    };
+    
     await updateDoc(employeeRef, {
-      promotions: [...promotions, { ...promotion, createdAt: serverTimestamp() }],
+      promotions: [...promotions, newPromotion],
       position: promotion.toPosition,
       basicSalary: promotion.toSalary,
       updatedAt: serverTimestamp(),
