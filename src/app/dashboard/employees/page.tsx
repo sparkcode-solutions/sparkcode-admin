@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { getEmployees, createEmployee, updateEmployee, deleteEmployee, updateContractStatus, addPromotion, calculateDaysSinceJoined } from '@/lib/firebase'
+import { getEmployees, createEmployee, updateEmployee, deleteEmployee, updateContractStatus, addPromotion, calculateDaysSinceJoined, updateEmployeeStatus } from '@/lib/firebase'
 import { Employee, Promotion } from '@/lib/firebase'
 import { format } from 'date-fns'
 
@@ -12,6 +12,7 @@ export default function EmployeesPage() {
   const [showEditModal, setShowEditModal] = useState(false)
   const [showPromotionModal, setShowPromotionModal] = useState(false)
   const [showImportModal, setShowImportModal] = useState(false)
+  const [showPromotionHistoryModal, setShowPromotionHistoryModal] = useState(false)
   const [importing, setImporting] = useState(false)
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null)
   const [formData, setFormData] = useState({
@@ -44,7 +45,7 @@ export default function EmployeesPage() {
     const result = await createEmployee({
       ...formData,
       basicSalary: parseFloat(formData.basicSalary),
-      status: 'active',
+      status: 'probation', // Default status for new employees
       contractSent: false,
     })
 
@@ -54,6 +55,15 @@ export default function EmployeesPage() {
       loadEmployees()
     } else {
       alert(result.error || 'Failed to add employee')
+    }
+  }
+
+  const handleStatusChange = async (employeeId: string, newStatus: 'probation' | 'parttime' | 'fulltime' | 'on notice' | 'fired' | 'resigned') => {
+    const result = await updateEmployeeStatus(employeeId, newStatus)
+    if (result.success) {
+      loadEmployees()
+    } else {
+      alert(result.error || 'Failed to update employee status')
     }
   }
 
@@ -102,9 +112,9 @@ export default function EmployeesPage() {
     const form = e.target as HTMLFormElement
     const promotionData: Omit<Promotion, 'id'> = {
       date: (form.querySelector('[name="date"]') as HTMLInputElement).value,
-      fromPosition: selectedEmployee.position,
+      fromPosition: selectedEmployee.position, // Explicitly store current position as "from"
       toPosition: (form.querySelector('[name="toPosition"]') as HTMLInputElement).value,
-      fromSalary: selectedEmployee.basicSalary,
+      fromSalary: selectedEmployee.basicSalary, // Explicitly store current salary as "from"
       toSalary: parseFloat((form.querySelector('[name="toSalary"]') as HTMLInputElement).value),
       notes: (form.querySelector('[name="notes"]') as HTMLInputElement).value,
     }
@@ -134,6 +144,18 @@ export default function EmployeesPage() {
 
       for (const emp of employeesToImport) {
         // Map old format to new format
+        let status: Employee['status'] = 'probation' // Default
+        if (emp.status) {
+          // Map old statuses to new ones
+          if (emp.status === 'active') {
+            status = 'fulltime'
+          } else if (emp.status === 'inactive') {
+            status = 'resigned'
+          } else if (['probation', 'parttime', 'fulltime', 'on notice', 'fired', 'resigned'].includes(emp.status)) {
+            status = emp.status as Employee['status']
+          }
+        }
+        
         const employeeData = {
           employeeId: emp.employeeId || emp.id || emp.employee_id,
           name: emp.name,
@@ -142,7 +164,7 @@ export default function EmployeesPage() {
           basicSalary: emp.basicSalary || emp.basic_salary,
           currency: emp.currency || 'Rs',
           joiningDate: emp.joiningDate || emp.joining_date,
-          status: emp.status || 'active',
+          status: status,
           contractSent: emp.contractSent || false,
           email: emp.email || '',
           phone: emp.phone || '',
@@ -272,6 +294,9 @@ export default function EmployeesPage() {
                   Position
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Status
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Days Since Joined
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -303,6 +328,32 @@ export default function EmployeesPage() {
                       <div className="text-sm text-gray-900">{employee.position}</div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
+                      <select
+                        value={employee.status}
+                        onChange={(e) => handleStatusChange(employee.id!, e.target.value as Employee['status'])}
+                        className={`text-xs font-medium px-3 py-1.5 rounded-lg border-none focus:ring-2 focus:ring-primary-500 cursor-pointer ${
+                          employee.status === 'probation'
+                            ? 'bg-yellow-100 text-yellow-800'
+                            : employee.status === 'parttime'
+                            ? 'bg-blue-100 text-blue-800'
+                            : employee.status === 'fulltime'
+                            ? 'bg-green-100 text-green-800'
+                            : employee.status === 'on notice'
+                            ? 'bg-orange-100 text-orange-800'
+                            : employee.status === 'fired'
+                            ? 'bg-red-100 text-red-800'
+                            : 'bg-gray-100 text-gray-800'
+                        }`}
+                      >
+                        <option value="probation">Probation</option>
+                        <option value="parttime">Part Time</option>
+                        <option value="fulltime">Full Time</option>
+                        <option value="on notice">On Notice</option>
+                        <option value="fired">Fired</option>
+                        <option value="resigned">Resigned</option>
+                      </select>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm text-gray-900">{daysSinceJoined} days</div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
@@ -323,9 +374,15 @@ export default function EmployeesPage() {
                       </button>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">
-                        {employee.promotions?.length || 0}
-                      </div>
+                      <button
+                        onClick={() => {
+                          setSelectedEmployee(employee)
+                          setShowPromotionHistoryModal(true)
+                        }}
+                        className="text-sm text-primary-600 hover:text-primary-900 font-medium"
+                      >
+                        {employee.promotions?.length || 0} {employee.promotions?.length === 1 ? 'promotion' : 'promotions'}
+                      </button>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                       <div className="flex items-center justify-end space-x-2">
@@ -536,39 +593,43 @@ export default function EmployeesPage() {
             <h2 className="text-xl font-bold mb-4">Add Promotion</h2>
             <form onSubmit={handlePromotion} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Current Position</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">From Position</label>
                 <input
                   type="text"
                   value={selectedEmployee.position}
                   disabled
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-100"
                 />
+                <p className="text-xs text-gray-500 mt-1">Current position</p>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">New Position</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">To Position</label>
                 <input
                   type="text"
                   name="toPosition"
                   required
+                  placeholder="Enter new position"
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Current Salary</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">From Salary</label>
                 <input
                   type="number"
                   value={selectedEmployee.basicSalary}
                   disabled
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-100"
                 />
+                <p className="text-xs text-gray-500 mt-1">Current salary</p>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">New Salary</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">To Salary</label>
                 <input
                   type="number"
                   name="toSalary"
                   required
                   min={selectedEmployee.basicSalary}
+                  placeholder="Enter new salary"
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                 />
               </div>
@@ -662,6 +723,156 @@ export default function EmployeesPage() {
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
               >
                 Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Promotion History Modal */}
+      {showPromotionHistoryModal && selectedEmployee && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold">Promotion History</h2>
+              <button
+                onClick={() => {
+                  setShowPromotionHistoryModal(false)
+                  setSelectedEmployee(null)
+                }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="mb-4 pb-4 border-b border-gray-200">
+              <p className="text-sm font-medium text-gray-700">Employee: {selectedEmployee.name}</p>
+              <p className="text-sm text-gray-500">{selectedEmployee.employeeId}</p>
+            </div>
+            {selectedEmployee.promotions && selectedEmployee.promotions.length > 0 ? (
+              <div className="space-y-4">
+                {selectedEmployee.promotions
+                  .sort((a, b) => {
+                    // Sort by date, newest first
+                    let dateA: Date
+                    let dateB: Date
+                    
+                    if (a.date) {
+                      dateA = new Date(a.date)
+                    } else if (a.createdAt) {
+                      dateA = typeof a.createdAt === 'object' && 'toDate' in a.createdAt
+                        ? (a.createdAt as any).toDate()
+                        : new Date(a.createdAt as any)
+                    } else {
+                      dateA = new Date(0)
+                    }
+                    
+                    if (b.date) {
+                      dateB = new Date(b.date)
+                    } else if (b.createdAt) {
+                      dateB = typeof b.createdAt === 'object' && 'toDate' in b.createdAt
+                        ? (b.createdAt as any).toDate()
+                        : new Date(b.createdAt as any)
+                    } else {
+                      dateB = new Date(0)
+                    }
+                    
+                    return dateB.getTime() - dateA.getTime()
+                  })
+                  .map((promotion, index) => {
+                    // Handle date conversion - support both string dates and Firestore timestamps
+                    let promotionDate: Date
+                    if (promotion.date) {
+                      promotionDate = new Date(promotion.date)
+                    } else if (promotion.createdAt) {
+                      // Handle Firestore timestamp
+                      if (typeof promotion.createdAt === 'object' && 'toDate' in promotion.createdAt) {
+                        promotionDate = (promotion.createdAt as any).toDate()
+                      } else {
+                        promotionDate = new Date(promotion.createdAt as any)
+                      }
+                    } else {
+                      promotionDate = new Date()
+                    }
+                    
+                    return (
+                      <div key={index} className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors">
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center space-x-2 mb-2">
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-primary-100 text-primary-800">
+                                Promotion #{selectedEmployee.promotions!.length - index}
+                              </span>
+                              <span className="text-sm text-gray-500">
+                                {format(promotionDate, 'MMM dd, yyyy')}
+                              </span>
+                            </div>
+                            <div className="space-y-2">
+                              <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                  <span className="text-xs text-gray-500 block mb-1">From Position</span>
+                                  <span className="text-sm font-medium text-gray-700">{promotion.fromPosition}</span>
+                                </div>
+                                <div>
+                                  <span className="text-xs text-gray-500 block mb-1">To Position</span>
+                                  <span className="text-sm font-medium text-primary-600">{promotion.toPosition}</span>
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                  <span className="text-xs text-gray-500 block mb-1">From Salary</span>
+                                  <span className="text-sm font-medium text-gray-700">
+                                    Rs. {promotion.fromSalary.toLocaleString()}
+                                  </span>
+                                </div>
+                                <div>
+                                  <span className="text-xs text-gray-500 block mb-1">To Salary</span>
+                                  <span className="text-sm font-medium text-green-600">
+                                    Rs. {promotion.toSalary.toLocaleString()}
+                                  </span>
+                                </div>
+                              </div>
+                              {promotion.notes && (
+                                <div className="mt-2 pt-2 border-t border-gray-100">
+                                  <span className="text-xs text-gray-500">Notes:</span>
+                                  <p className="text-sm text-gray-700 mt-1">{promotion.notes}</p>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+              </div>
+            ) : (
+              <div className="text-center py-12">
+                <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <p className="mt-4 text-sm text-gray-500">No promotions recorded yet</p>
+                <button
+                  onClick={() => {
+                    setShowPromotionHistoryModal(false)
+                    setShowPromotionModal(true)
+                  }}
+                  className="mt-4 px-4 py-2 text-sm bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
+                >
+                  Add First Promotion
+                </button>
+              </div>
+            )}
+            <div className="mt-6 flex justify-end">
+              <button
+                onClick={() => {
+                  setShowPromotionHistoryModal(false)
+                  setSelectedEmployee(null)
+                }}
+                className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                Close
               </button>
             </div>
           </div>

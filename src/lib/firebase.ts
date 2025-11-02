@@ -121,9 +121,10 @@ export interface Employee {
   joiningDate: string;
   email?: string;
   phone?: string;
-  status: 'active' | 'inactive';
+  status: 'probation' | 'parttime' | 'fulltime' | 'on notice' | 'fired' | 'resigned';
   contractSent: boolean;
   contractSentDate?: string;
+  statusChangeDate?: string; // Date when status was last changed (important for fired employees)
   promotions?: Promotion[];
   createdAt?: Timestamp | Date;
   updatedAt?: Timestamp | Date;
@@ -178,9 +179,22 @@ export const getEmployees = async () => {
     const q = query(collection(db, collections.employees), orderBy('createdAt', 'desc'));
     const querySnapshot = await getDocs(q);
     const employees: Employee[] = [];
+    const oneWeekAgo = new Date();
+    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
     
     querySnapshot.forEach((doc) => {
-      employees.push({ id: doc.id, ...doc.data() } as Employee);
+      const employee = { id: doc.id, ...doc.data() } as Employee;
+      
+      // Filter out fired employees after 1 week
+      if (employee.status === 'fired' && employee.statusChangeDate) {
+        const firedDate = new Date(employee.statusChangeDate);
+        if (firedDate < oneWeekAgo) {
+          // Skip this employee - fired more than 1 week ago
+          return;
+        }
+      }
+      
+      employees.push(employee);
     });
     
     return { success: true, data: employees };
@@ -304,18 +318,18 @@ export const getSalaryRecords = async (employeeId?: string) => {
   }
 };
 
-// Update contract status
-export const updateContractStatus = async (employeeId: string, contractSent: boolean) => {
+// Update employee status
+export const updateEmployeeStatus = async (employeeId: string, status: Employee['status']) => {
   try {
     const docRef = doc(db, collections.employees, employeeId);
     await updateDoc(docRef, {
-      contractSent,
-      contractSentDate: contractSent ? new Date().toISOString() : null,
+      status,
+      statusChangeDate: new Date().toISOString(),
       updatedAt: serverTimestamp(),
     });
     return { success: true };
   } catch (error: any) {
-    console.error('Error updating contract status:', error);
+    console.error('Error updating employee status:', error);
     return { success: false, error: error.message };
   }
 };
