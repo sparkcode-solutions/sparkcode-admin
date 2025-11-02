@@ -27,10 +27,10 @@ export default function DashboardLayout({
           {/* Logo */}
           <div className="flex items-center justify-center h-20 px-4 border-b border-gray-200">
             <Image
-              src="/sparkcode-logo.png"
+              src="/icon-small.png"
               alt="Sparkcode Solutions Logo"
-              width={120}
-              height={48}
+              width={40}
+              height={40}
               className="h-auto"
               priority
             />

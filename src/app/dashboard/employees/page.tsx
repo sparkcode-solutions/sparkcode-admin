@@ -11,6 +11,8 @@ export default function EmployeesPage() {
   const [showAddModal, setShowAddModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
   const [showPromotionModal, setShowPromotionModal] = useState(false)
+  const [showImportModal, setShowImportModal] = useState(false)
+  const [importing, setImporting] = useState(false)
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null)
   const [formData, setFormData] = useState({
     employeeId: '',
@@ -117,6 +119,84 @@ export default function EmployeesPage() {
     }
   }
 
+  const handleImportEmployees = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setImporting(true)
+    try {
+      const text = await file.text()
+      const jsonData = JSON.parse(text)
+      const employeesToImport = Array.isArray(jsonData) ? jsonData : jsonData.employees || []
+
+      let successCount = 0
+      let errorCount = 0
+
+      for (const emp of employeesToImport) {
+        // Map old format to new format
+        const employeeData = {
+          employeeId: emp.employeeId || emp.id || emp.employee_id,
+          name: emp.name,
+          address: emp.address,
+          position: emp.position,
+          basicSalary: emp.basicSalary || emp.basic_salary,
+          currency: emp.currency || 'Rs',
+          joiningDate: emp.joiningDate || emp.joining_date,
+          status: emp.status || 'active',
+          contractSent: emp.contractSent || false,
+          email: emp.email || '',
+          phone: emp.phone || '',
+        }
+
+        const result = await createEmployee(employeeData)
+        if (result.success) {
+          successCount++
+        } else {
+          errorCount++
+          console.error(`Failed to import ${employeeData.name}:`, result.error)
+        }
+      }
+
+      alert(`Import completed!\nSuccess: ${successCount}\nFailed: ${errorCount}`)
+      setShowImportModal(false)
+      loadEmployees()
+    } catch (error: any) {
+      alert(`Import failed: ${error.message}`)
+    } finally {
+      setImporting(false)
+      // Reset file input
+      e.target.value = ''
+    }
+  }
+
+  const handleLoadDefaultEmployees = async () => {
+    setImporting(true)
+    try {
+      const response = await fetch('/employees-import.json')
+      const employeesToImport = await response.json()
+
+      let successCount = 0
+      let errorCount = 0
+
+      for (const emp of employeesToImport) {
+        const result = await createEmployee(emp)
+        if (result.success) {
+          successCount++
+        } else {
+          errorCount++
+        }
+      }
+
+      alert(`Import completed!\nSuccess: ${successCount}\nFailed: ${errorCount}`)
+      setShowImportModal(false)
+      loadEmployees()
+    } catch (error: any) {
+      alert(`Import failed: ${error.message}`)
+    } finally {
+      setImporting(false)
+    }
+  }
+
   const resetForm = () => {
     setFormData({
       employeeId: '',
@@ -163,12 +243,20 @@ export default function EmployeesPage() {
           <h1 className="text-3xl font-bold text-gray-900">Employees</h1>
           <p className="text-gray-600 mt-2">Manage employee information and onboarding</p>
         </div>
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
-        >
-          Add Employee
-        </button>
+        <div className="flex space-x-3">
+          <button
+            onClick={() => setShowImportModal(true)}
+            className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+          >
+            Import
+          </button>
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
+          >
+            Add Employee
+          </button>
+        </div>
       </div>
 
       {/* Employees Table */}
@@ -521,6 +609,61 @@ export default function EmployeesPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Import Modal */}
+      {showImportModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+            <h2 className="text-xl font-bold mb-4">Import Employees</h2>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Upload JSON File
+                </label>
+                <input
+                  type="file"
+                  accept=".json"
+                  onChange={handleImportEmployees}
+                  disabled={importing}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:opacity-50"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Select a JSON file with employee data
+                </p>
+              </div>
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-gray-300"></div>
+                </div>
+                <div className="relative flex justify-center text-sm">
+                  <span className="px-2 bg-white text-gray-500">or</span>
+                </div>
+              </div>
+              <button
+                onClick={handleLoadDefaultEmployees}
+                disabled={importing}
+                className="w-full px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+              >
+                {importing ? (
+                  <>
+                    <div className="w-4 h-4 mr-2 animate-spin border-2 border-white border-t-transparent rounded-full"></div>
+                    <span>Importing...</span>
+                  </>
+                ) : (
+                  <span>Load Default Employees</span>
+                )}
+              </button>
+              <button
+                onClick={() => setShowImportModal(false)}
+                disabled={importing}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       )}
