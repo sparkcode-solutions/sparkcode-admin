@@ -83,15 +83,6 @@ export default function SalaryPage() {
     }
   }
 
-  const handleGeneratePayslip = async (record: SalaryRecord) => {
-    const employee = employees.find((e) => e.employeeId === record.employeeId)
-    if (!employee) {
-      alert('Employee not found')
-      return
-    }
-    downloadPayslip(employee, record)
-  }
-
   const handlePreviewPayslip = async (record: SalaryRecord) => {
     const employee = employees.find((e) => e.employeeId === record.employeeId)
     if (!employee) {
@@ -99,6 +90,15 @@ export default function SalaryPage() {
       return
     }
     previewPayslip(employee, record)
+  }
+
+  const handleCreatePayslip = async (record: SalaryRecord) => {
+    const employee = employees.find((e) => e.employeeId === record.employeeId)
+    if (!employee) {
+      alert('Employee not found')
+      return
+    }
+    downloadPayslip(employee, record)
   }
 
   const handleImportSalaryRecords = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -266,6 +266,35 @@ export default function SalaryPage() {
     'July', 'August', 'September', 'October', 'November', 'December'
   ]
 
+  // Group salary records by employee
+  const groupedByEmployee = employees.reduce((acc, employee) => {
+    const employeeRecords = salaryRecords
+      .filter(record => record.employeeId === employee.employeeId)
+      .sort((a, b) => {
+        // Sort by payment date, newest first
+        const dateA = new Date(a.paymentDate).getTime()
+        const dateB = new Date(b.paymentDate).getTime()
+        return dateB - dateA
+      })
+    
+    // Include all employees, even if they have no records
+    acc[employee.employeeId] = {
+      employee,
+      records: employeeRecords
+    }
+    
+    return acc
+  }, {} as Record<string, { employee: Employee; records: SalaryRecord[] }>)
+
+  const handleCreatePayslip = async (record: SalaryRecord) => {
+    const employee = employees.find((e) => e.employeeId === record.employeeId)
+    if (!employee) {
+      alert('Employee not found')
+      return
+    }
+    downloadPayslip(employee, record)
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -303,91 +332,110 @@ export default function SalaryPage() {
         </div>
       </div>
 
-      {/* Salary Records Table */}
-      <div className="bg-white rounded-lg shadow overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Employee
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Period
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Amount
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Payment Date
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Status
-                </th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {salaryRecords.map((record) => (
-                <tr key={record.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm font-medium text-gray-900">{record.employeeName}</div>
-                    <div className="text-sm text-gray-500">{record.employeeId}</div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-900">
-                      {monthNames[record.month - 1]} {record.year}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-900">
-                      Rs. {record.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-900">
-                      {format(new Date(record.paymentDate), 'MMM dd, yyyy')}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span
-                      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                        record.status === 'paid'
-                          ? 'bg-green-100 text-green-800'
-                          : 'bg-yellow-100 text-yellow-800'
-                      }`}
-                    >
-                      {record.status === 'paid' ? 'Paid' : 'Pending'}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                    <div className="flex items-center justify-end space-x-2">
-                      <button
-                        onClick={() => handlePreviewPayslip(record)}
-                        className="text-blue-600 hover:text-blue-900"
-                      >
-                        Preview
-                      </button>
-                      <button
-                        onClick={() => handleGeneratePayslip(record)}
-                        className="text-primary-600 hover:text-primary-900"
-                      >
-                        Download PDF
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {salaryRecords.length === 0 && (
-            <div className="text-center py-12">
-              <p className="text-gray-500">No salary records found</p>
+      {/* Employees and Salary Breakdown */}
+      <div className="space-y-4">
+        {Object.values(groupedByEmployee).map(({ employee, records }) => (
+          <div key={employee.id} className="bg-white rounded-lg shadow overflow-hidden">
+            {/* Employee Header */}
+            <div className="px-6 py-4 bg-gray-50 border-b border-gray-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">{employee.name}</h3>
+                  <p className="text-sm text-gray-600">{employee.employeeId} • {employee.position}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm text-gray-600">Total Records</p>
+                  <p className="text-lg font-semibold text-gray-900">{records.length}</p>
+                </div>
+              </div>
             </div>
-          )}
-        </div>
+
+            {/* Salary Records */}
+            {records.length > 0 ? (
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Period
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Amount
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Payment Date
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Status
+                      </th>
+                      <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {records.map((record) => (
+                      <tr key={record.id} className="hover:bg-gray-50">
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm text-gray-900">
+                            {monthNames[record.month - 1]} {record.year}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm font-medium text-gray-900">
+                            Rs. {record.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm text-gray-900">
+                            {format(new Date(record.paymentDate), 'MMM dd, yyyy')}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span
+                            className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                              record.status === 'paid'
+                                ? 'bg-green-100 text-green-800'
+                                : 'bg-yellow-100 text-yellow-800'
+                            }`}
+                          >
+                            {record.status === 'paid' ? 'Paid' : 'Pending'}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                          <div className="flex items-center justify-end space-x-2">
+                            <button
+                              onClick={() => handlePreviewPayslip(record)}
+                              className="text-blue-600 hover:text-blue-900"
+                            >
+                              Preview
+                            </button>
+                            <button
+                              onClick={() => handleCreatePayslip(record)}
+                              className="px-3 py-1 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors text-xs"
+                            >
+                              Create Payslip
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="px-6 py-8 text-center">
+                <p className="text-gray-500">No salary records found for this employee</p>
+              </div>
+            )}
+          </div>
+        ))}
+
+        {Object.keys(groupedByEmployee).length === 0 && (
+          <div className="bg-white rounded-lg shadow p-12 text-center">
+            <p className="text-gray-500">No employees with salary records found</p>
+          </div>
+        )}
       </div>
 
       {/* Add Salary Record Modal */}
