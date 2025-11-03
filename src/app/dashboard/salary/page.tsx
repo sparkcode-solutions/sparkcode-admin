@@ -286,15 +286,6 @@ export default function SalaryPage() {
     return acc
   }, {} as Record<string, { employee: Employee; records: SalaryRecord[] }>)
 
-  const handleCreatePayslip = async (record: SalaryRecord) => {
-    const employee = employees.find((e) => e.employeeId === record.employeeId)
-    if (!employee) {
-      alert('Employee not found')
-      return
-    }
-    downloadPayslip(employee, record)
-  }
-
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
