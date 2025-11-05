@@ -153,10 +153,25 @@ export interface SalaryRecord {
   createdAt?: Timestamp | Date;
 }
 
+export interface IncomeRecord {
+  id?: string;
+  month: number;
+  year: number;
+  totalAudReceived: number;
+  founderSalaryAud: number;
+  conversionRate: number; // AUD to NPR
+  bankCuts: number; // in AUD
+  totalEmployeeSalariesNpr: number;
+  profitLossAud: number;
+  createdAt?: Timestamp | Date;
+  updatedAt?: Timestamp | Date;
+}
+
 // Collections
 export const collections = {
   employees: 'employees',
   salaryRecords: 'salaryRecords',
+  incomeRecords: 'incomeRecords',
 };
 
 // Employee CRUD operations
@@ -348,5 +363,118 @@ export const calculateDaysSinceJoined = (joiningDate: string): number => {
   const diffTime = Math.abs(today.getTime() - joinDate.getTime());
   const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
   return diffDays;
+};
+
+// Income record operations
+export const createIncomeRecord = async (record: Omit<IncomeRecord, 'id'>) => {
+  try {
+    // Check if record for this month/year already exists
+    const q = query(
+      collection(db, collections.incomeRecords),
+      where('month', '==', record.month),
+      where('year', '==', record.year)
+    );
+    const querySnapshot = await getDocs(q);
+    
+    if (!querySnapshot.empty) {
+      return { success: false, error: 'Income record for this month already exists' };
+    }
+
+    const docRef = await addDoc(collection(db, collections.incomeRecords), {
+      ...record,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    return { success: true, id: docRef.id };
+  } catch (error: any) {
+    console.error('Error creating income record:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+export const getIncomeRecords = async (month?: number, year?: number) => {
+  try {
+    let q;
+    if (month && year) {
+      q = query(
+        collection(db, collections.incomeRecords),
+        where('month', '==', month),
+        where('year', '==', year)
+      );
+    } else {
+      q = query(
+        collection(db, collections.incomeRecords),
+        orderBy('year', 'desc'),
+        orderBy('month', 'desc')
+      );
+    }
+    
+    const querySnapshot = await getDocs(q);
+    const records: IncomeRecord[] = [];
+    
+    querySnapshot.forEach((doc) => {
+      records.push({ id: doc.id, ...doc.data() } as IncomeRecord);
+    });
+    
+    return { success: true, data: records };
+  } catch (error: any) {
+    console.error('Error getting income records:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+export const getIncomeRecordsByMonths = async (monthYearPairs: Array<{ month: number; year: number }>) => {
+  try {
+    const allRecords: IncomeRecord[] = [];
+    
+    // Fetch all records and filter in memory (Firestore doesn't support OR on compound queries)
+    const q = query(collection(db, collections.incomeRecords));
+    const querySnapshot = await getDocs(q);
+    
+    const monthYearSet = new Set(monthYearPairs.map(my => `${my.year}-${my.month}`));
+    
+    querySnapshot.forEach((doc) => {
+      const record = { id: doc.id, ...doc.data() } as IncomeRecord;
+      if (monthYearSet.has(`${record.year}-${record.month}`)) {
+        allRecords.push(record);
+      }
+    });
+    
+    // Sort by year and month descending
+    allRecords.sort((a, b) => {
+      if (a.year !== b.year) return b.year - a.year;
+      return b.month - a.month;
+    });
+    
+    return { success: true, data: allRecords };
+  } catch (error: any) {
+    console.error('Error getting income records by months:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+export const updateIncomeRecord = async (id: string, updates: Partial<IncomeRecord>) => {
+  try {
+    const docRef = doc(db, collections.incomeRecords, id);
+    await updateDoc(docRef, {
+      ...updates,
+      updatedAt: serverTimestamp(),
+    });
+    return { success: true };
+  } catch (error: any) {
+    console.error('Error updating income record:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+export const deleteIncomeRecord = async (id: string) => {
+  try {
+    const docRef = doc(db, collections.incomeRecords, id);
+    await deleteDoc(docRef);
+    return { success: true };
+  } catch (error: any) {
+    console.error('Error deleting income record:', error);
+    return { success: false, error: error.message };
+  }
 };
 
