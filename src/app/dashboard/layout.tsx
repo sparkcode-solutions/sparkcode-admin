@@ -9,6 +9,7 @@ const navigation = [
   { name: 'Dashboard', href: '/dashboard' },
   { name: 'Employees', href: '/dashboard/employees' },
   { name: 'Salary Records', href: '/dashboard/salary' },
+  { name: 'Income Tracking', href: '/dashboard/income' },
 ]
 
 export default function DashboardLayout({

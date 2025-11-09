@@ -89,7 +89,7 @@ export default function SalaryPage() {
       alert('Employee not found')
       return
     }
-    previewPayslip(employee, record)
+    await previewPayslip(employee, record)
   }
 
   const handleCreatePayslip = async (record: SalaryRecord) => {
@@ -98,7 +98,7 @@ export default function SalaryPage() {
       alert('Employee not found')
       return
     }
-    downloadPayslip(employee, record)
+    await downloadPayslip(employee, record)
   }
 
   const handleImportSalaryRecords = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -266,7 +266,7 @@ export default function SalaryPage() {
     'July', 'August', 'September', 'October', 'November', 'December'
   ]
 
-  // Group salary records by employee
+  // Group salary records by employee and remove duplicates
   const groupedByEmployee = employees.reduce((acc, employee) => {
     const employeeRecords = salaryRecords
       .filter(record => record.employeeId === employee.employeeId)
@@ -277,10 +277,22 @@ export default function SalaryPage() {
         return dateB - dateA
       })
     
+    // Remove duplicates - keep only the first (most recent) record for each month/year combination
+    const uniqueRecords: SalaryRecord[] = []
+    const seenMonths = new Set<string>()
+    
+    employeeRecords.forEach(record => {
+      const monthKey = `${record.year}-${record.month}`
+      if (!seenMonths.has(monthKey)) {
+        seenMonths.add(monthKey)
+        uniqueRecords.push(record)
+      }
+    })
+    
     // Include all employees, even if they have no records
     acc[employee.employeeId] = {
       employee,
-      records: employeeRecords
+      records: uniqueRecords
     }
     
     return acc

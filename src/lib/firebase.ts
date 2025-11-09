@@ -160,7 +160,7 @@ export interface IncomeRecord {
   totalAudReceived: number;
   founderSalaryAud: number;
   conversionRate: number; // AUD to NPR
-  bankCuts: number; // in AUD
+  bankCutsNpr: number; // in NPR (local bank fees)
   totalEmployeeSalariesNpr: number;
   profitLossAud: number;
   createdAt?: Timestamp | Date;

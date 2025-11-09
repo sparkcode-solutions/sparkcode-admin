@@ -3,7 +3,59 @@ import autoTable from 'jspdf-autotable'
 import { Employee, SalaryRecord } from '@/lib/firebase'
 import { COMPANY_INFO } from '@/types'
 
-export const generatePayslip = (employee: Employee, salaryRecord: SalaryRecord) => {
+// Helper function to get the salary for an employee for a specific month based on promotion dates
+const getEmployeeSalaryForMonth = (employee: Employee, month: number, year: number): number => {
+  // If no promotions, use basic salary
+  if (!employee.promotions || employee.promotions.length === 0) {
+    return employee.basicSalary
+  }
+
+  // Sort promotions by date (oldest first)
+  const sortedPromotions = [...employee.promotions].sort((a, b) => {
+    const dateA = new Date(a.date).getTime()
+    const dateB = new Date(b.date).getTime()
+    return dateA - dateB
+  })
+
+  // Start with the original salary (from the first promotion's fromSalary)
+  // This ensures we use the salary before any promotions
+  const originalSalary = sortedPromotions.length > 0 
+    ? sortedPromotions[0].fromSalary 
+    : employee.basicSalary
+  
+  let activeSalary = originalSalary
+  
+  // Find the most recent promotion that happened before the target month
+  // Promotion date determines when new salary takes effect
+  // If promotion is in September, September uses old salary (fromSalary), October uses new salary (toSalary)
+  for (const promotion of sortedPromotions) {
+    const promoDate = new Date(promotion.date)
+    const promoMonth = promoDate.getMonth() + 1
+    const promoYear = promoDate.getFullYear()
+    
+    // If promotion happened before the target month, new salary is active
+    if (promoYear < year || (promoYear === year && promoMonth < month)) {
+      // Promotion happened before target month, so new salary is active
+      activeSalary = promotion.toSalary
+    } else if (promoYear === year && promoMonth === month) {
+      // Promotion happened in the same month, so old salary (fromSalary) is still active
+      // Use the fromSalary for this promotion
+      activeSalary = promotion.fromSalary
+      break
+    } else {
+      // Promotion happened after target month, stop looking
+      break
+    }
+  }
+  
+  return activeSalary
+}
+
+export const generatePayslip = async (employee: Employee, salaryRecord: SalaryRecord) => {
+  // Calculate the correct salary based on promotion dates, not the amount in salaryRecord
+  // This ensures payslips show the correct salary even if salary records were backfilled incorrectly
+  const correctSalary = getEmployeeSalaryForMonth(employee, salaryRecord.month, salaryRecord.year)
+  
   const doc = new jsPDF()
   
   // Page setup
@@ -13,10 +65,40 @@ export const generatePayslip = (employee: Employee, salaryRecord: SalaryRecord) 
   
   let yPos = margin
   
-  // Header
+  // Header - Company name and info
   doc.setFontSize(24)
   doc.setFont('helvetica', 'bold')
-  doc.text(COMPANY_INFO.name, margin, yPos)
+  const companyNameY = yPos
+  doc.text(COMPANY_INFO.name, margin, companyNameY)
+  
+  // Load and add logo if available - aligned with company name
+  if (COMPANY_INFO.logoPath) {
+    try {
+      // Convert logo to base64 data URL
+      const logoResponse = await fetch(COMPANY_INFO.logoPath)
+      const logoBlob = await logoResponse.blob()
+      const logoDataUrl = await new Promise<string>((resolve) => {
+        const reader = new FileReader()
+        reader.onloadend = () => resolve(reader.result as string)
+        reader.readAsDataURL(logoBlob)
+      })
+      
+      // Calculate logo size (bigger) and align vertically with company name
+      const logoHeight = 35 // Increased size
+      const logoWidth = logoHeight * 1.0
+      const logoX = pageWidth - margin - logoWidth
+      
+      // Align logo vertically with company name (font size 24 has ~7mm height)
+      // Center the logo vertically with the text
+      const textHeight = 7 // Approximate height of 24pt font
+      const logoY = companyNameY - (logoHeight - textHeight) / 2
+      
+      doc.addImage(logoDataUrl, 'PNG', logoX, logoY, logoWidth, logoHeight)
+    } catch (error) {
+      console.warn('Failed to load logo:', error)
+      // Continue without logo if loading fails
+    }
+  }
   
   yPos += 10
   doc.setFontSize(10)
@@ -72,16 +154,16 @@ export const generatePayslip = (employee: Employee, salaryRecord: SalaryRecord) 
   
   yPos += 50
   
-  // Salary Details Table
+  // Salary Details Table - Use calculated salary instead of salaryRecord.amount
   const tableData = [
     ['EARNINGS', ''],
-    ['Basic Salary', `Rs. ${salaryRecord.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`],
-    ['Total Earnings', `Rs. ${salaryRecord.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`],
+    ['Basic Salary', `Rs. ${correctSalary.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`],
+    ['Total Earnings', `Rs. ${correctSalary.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`],
     ['', ''],
     ['DEDUCTIONS', ''],
     ['Total Deductions', 'Rs. 0.00'],
     ['', ''],
-    ['NET SALARY', `Rs. ${salaryRecord.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`],
+    ['NET SALARY', `Rs. ${correctSalary.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`],
   ]
   
   autoTable(doc, {
@@ -101,24 +183,35 @@ export const generatePayslip = (employee: Employee, salaryRecord: SalaryRecord) 
       fontSize: 10,
       cellPadding: 4,
     },
+    margin: { left: margin, right: margin },
+    tableWidth: contentWidth,
     columnStyles: {
-      0: { cellWidth: 140 },
-      1: { halign: 'right', cellWidth: 60 },
+      0: { halign: 'left', cellWidth: 'auto' },
+      1: { halign: 'right', cellWidth: 'auto' },
     },
     didParseCell: (data: any) => {
-      // Style earnings row
-      if (data.row.index === 0 || data.row.index === 2) {
+      // Note: data.row.index includes the header row, so body rows start at index 1
+      // Row indices: 0=header, 1=EARNINGS, 2=Basic Salary, 3=Total Earnings, 4=empty, 
+      //              5=DEDUCTIONS, 6=Total Deductions, 7=empty, 8=NET SALARY
+      
+      // Style EARNINGS and Total Earnings rows (rows 1 and 3)
+      if (data.row.index === 1 || data.row.index === 3) {
         data.cell.styles.fontStyle = 'bold'
       }
-      // Style net salary row
-      if (data.row.index === 7) {
+      // Style net salary row (row 8)
+      if (data.row.index === 8) {
         data.cell.styles.fillColor = [212, 237, 218]
         data.cell.styles.fontStyle = 'bold'
         data.cell.styles.fontSize = 12
+        data.cell.styles.textColor = [0, 0, 0] // Ensure text is black on green background
       }
-      // Style empty rows
-      if (data.row.index === 3 || data.row.index === 6) {
+      // Style empty rows (rows 4 and 7)
+      if (data.row.index === 4 || data.row.index === 7) {
         data.cell.styles.fillColor = [255, 255, 255]
+      }
+      // Style DEDUCTIONS row (row 5)
+      if (data.row.index === 5) {
+        data.cell.styles.fontStyle = 'bold'
       }
     },
   })
@@ -147,14 +240,13 @@ export const generatePayslip = (employee: Employee, salaryRecord: SalaryRecord) 
   return doc
 }
 
-export const downloadPayslip = (employee: Employee, salaryRecord: SalaryRecord) => {
-  const doc = generatePayslip(employee, salaryRecord)
+export const downloadPayslip = async (employee: Employee, salaryRecord: SalaryRecord) => {
+  const doc = await generatePayslip(employee, salaryRecord)
   const fileName = `Payslip_${employee.employeeId}_${salaryRecord.year}_${String(salaryRecord.month).padStart(2, '0')}.pdf`
   doc.save(fileName)
 }
 
-export const previewPayslip = (employee: Employee, salaryRecord: SalaryRecord) => {
-  const doc = generatePayslip(employee, salaryRecord)
+export const previewPayslip = async (employee: Employee, salaryRecord: SalaryRecord) => {
+  const doc = await generatePayslip(employee, salaryRecord)
   doc.output('dataurlnewwindow')
 }
-

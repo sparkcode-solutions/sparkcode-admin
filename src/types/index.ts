@@ -17,6 +17,6 @@ export const COMPANY_INFO: CompanyInfo = {
   panNo: '130302052',
   email: 'office@sparkcode.tech',
   phone: '+9779869195575',
-  logoPath: '/sparkcode-logo.png'
+  logoPath: '/icon-small.png'
 }
 

@@ -2,16 +2,14 @@
 
 import { useEffect, useState } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
-import { 
-  getEmployees, 
-  getSalaryRecords, 
+import {
+  getEmployees,
   getIncomeRecords,
   getIncomeRecordsByMonths,
   createIncomeRecord,
   deleteIncomeRecord,
-  Employee, 
-  SalaryRecord,
-  IncomeRecord 
+  Employee,
+  IncomeRecord
 } from '@/lib/firebase'
 import { format } from 'date-fns'
 
@@ -26,18 +24,17 @@ interface MonthYear {
 export default function IncomePage() {
   const { user } = useAuth()
   const [employees, setEmployees] = useState<Employee[]>([])
-  const [salaryRecords, setSalaryRecords] = useState<SalaryRecord[]>([])
   const [incomeRecords, setIncomeRecords] = useState<IncomeRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [showAddModal, setShowAddModal] = useState(false)
   const [showMonthSelector, setShowMonthSelector] = useState(false)
-  
+
   // Month selection state
   const [selectedMonths, setSelectedMonths] = useState<MonthYear[]>([])
   const [useRangeSelector, setUseRangeSelector] = useState(false)
   const [rangeStart, setRangeStart] = useState({ month: 1, year: new Date().getFullYear() })
   const [rangeEnd, setRangeEnd] = useState({ month: new Date().getMonth() + 1, year: new Date().getFullYear() })
-  
+
   // Form data for adding income
   const [formData, setFormData] = useState({
     month: new Date().getMonth() + 1,
@@ -45,7 +42,7 @@ export default function IncomePage() {
     totalAudReceived: '',
     founderSalaryAud: '',
     conversionRate: '',
-    bankCuts: '',
+    bankCutsNpr: '',
   })
 
   const monthNames = [
@@ -53,23 +50,94 @@ export default function IncomePage() {
     'July', 'August', 'September', 'October', 'November', 'December'
   ]
 
+  // Helper function to check if employee joined on or before the target month
+  const didEmployeeJoinBeforeMonth = (employee: Employee, month: number, year: number): boolean => {
+    const joinDate = new Date(employee.joiningDate)
+    const joinMonth = joinDate.getMonth() + 1
+    const joinYear = joinDate.getFullYear()
+
+    // Employee joined before the target month/year
+    if (joinYear < year) return true
+    if (joinYear === year && joinMonth <= month) return true
+    return false
+  }
+
+  // Helper function to get the salary for an employee for a specific month based on promotion dates
+  const getEmployeeSalaryForMonth = (employee: Employee, month: number, year: number): number => {
+    // If no promotions, use basic salary
+    if (!employee.promotions || employee.promotions.length === 0) {
+      return employee.basicSalary
+    }
+
+    // Sort promotions by date (oldest first)
+    const sortedPromotions = [...employee.promotions].sort((a, b) => {
+      const dateA = new Date(a.date).getTime()
+      const dateB = new Date(b.date).getTime()
+      return dateA - dateB
+    })
+
+    // Start with the original salary (from the first promotion's fromSalary)
+    // This ensures we use the salary before any promotions
+    const originalSalary = sortedPromotions.length > 0
+      ? sortedPromotions[0].fromSalary
+      : employee.basicSalary
+
+    let activeSalary = originalSalary
+
+    // Find the most recent promotion that happened before the target month
+    // Promotion date determines when new salary takes effect
+    // If promotion is in September, September uses old salary (fromSalary), October uses new salary (toSalary)
+    for (const promotion of sortedPromotions) {
+      const promoDate = new Date(promotion.date)
+      const promoMonth = promoDate.getMonth() + 1
+      const promoYear = promoDate.getFullYear()
+
+      // If promotion happened before the target month, new salary is active
+      if (promoYear < year || (promoYear === year && promoMonth < month)) {
+        // Promotion happened before target month, so new salary is active
+        activeSalary = promotion.toSalary
+      } else if (promoYear === year && promoMonth === month) {
+        // Promotion happened in the same month, so old salary (fromSalary) is still active
+        // Use the fromSalary for this promotion
+        activeSalary = promotion.fromSalary
+        break
+      } else {
+        // Promotion happened after target month, stop looking
+        break
+      }
+    }
+
+    return activeSalary
+  }
+
+  // Calculate total employee salaries for a specific month
+  const calculateEmployeeSalariesForMonth = (month: number, year: number): number => {
+    let total = 0
+
+    employees.forEach(employee => {
+      // Only include employees who joined on or before this month
+      if (didEmployeeJoinBeforeMonth(employee, month, year)) {
+        const salary = getEmployeeSalaryForMonth(employee, month, year)
+        total += salary
+      }
+    })
+
+    return total
+  }
+
   useEffect(() => {
     loadData()
   }, [])
 
   const loadData = async () => {
     setLoading(true)
-    const [employeesResult, salaryResult, incomeResult] = await Promise.all([
+    const [employeesResult, incomeResult] = await Promise.all([
       getEmployees(),
-      getSalaryRecords(),
       getIncomeRecords(),
     ])
 
     if (employeesResult.success && employeesResult.data) {
       setEmployees(employeesResult.data)
-    }
-    if (salaryResult.success && salaryResult.data) {
-      setSalaryRecords(salaryResult.data)
     }
     if (incomeResult.success && incomeResult.data) {
       setIncomeRecords(incomeResult.data)
@@ -95,21 +163,18 @@ export default function IncomePage() {
 
   const handleAddIncome = async (e: React.FormEvent) => {
     e.preventDefault()
-    
-    // Get employee salaries for this month
-    const monthSalaries = salaryRecords.filter(
-      r => r.month === formData.month && r.year === formData.year
-    )
-    const totalEmployeeSalariesNpr = monthSalaries.reduce((sum, r) => sum + r.amount, 0)
-    
+
+    // Calculate employee salaries for this month based on promotion dates and join dates
+    const totalEmployeeSalariesNpr = calculateEmployeeSalariesForMonth(formData.month, formData.year)
+
     // Calculate profit/loss
     const totalAud = parseFloat(formData.totalAudReceived)
     const founderSalary = parseFloat(formData.founderSalaryAud)
-    const bankCuts = parseFloat(formData.bankCuts)
+    const bankCutsNpr = parseFloat(formData.bankCutsNpr)
     const conversionRate = parseFloat(formData.conversionRate)
-    
-    const availableAud = totalAud - founderSalary - bankCuts
-    const availableNpr = availableAud * conversionRate
+
+    const availableAud = totalAud - founderSalary
+    const availableNpr = (availableAud * conversionRate) - bankCutsNpr
     const profitLossAud = (availableNpr - totalEmployeeSalariesNpr) / conversionRate
 
     const incomeRecord: Omit<IncomeRecord, 'id'> = {
@@ -118,7 +183,7 @@ export default function IncomePage() {
       totalAudReceived: totalAud,
       founderSalaryAud: founderSalary,
       conversionRate: conversionRate,
-      bankCuts: bankCuts,
+      bankCutsNpr: bankCutsNpr,
       totalEmployeeSalariesNpr: totalEmployeeSalariesNpr,
       profitLossAud: profitLossAud,
     }
@@ -150,14 +215,14 @@ export default function IncomePage() {
       totalAudReceived: '',
       founderSalaryAud: '',
       conversionRate: '',
-      bankCuts: '',
+      bankCutsNpr: '',
     })
   }
 
   const toggleMonthSelection = (month: number, year: number) => {
     const key = `${year}-${month}`
     const exists = selectedMonths.some(m => m.month === month && m.year === year)
-    
+
     if (exists) {
       setSelectedMonths(selectedMonths.filter(m => !(m.month === month && m.year === year)))
     } else {
@@ -169,9 +234,9 @@ export default function IncomePage() {
     const months: MonthYear[] = []
     let currentYear = rangeStart.year
     let currentMonth = rangeStart.month
-    
+
     const endDate = rangeEnd.year * 12 + rangeEnd.month
-    
+
     while (currentYear * 12 + currentMonth <= endDate) {
       months.push({ month: currentMonth, year: currentYear })
       currentMonth++
@@ -180,7 +245,7 @@ export default function IncomePage() {
         currentYear++
       }
     }
-    
+
     setSelectedMonths(months)
   }
 
@@ -199,27 +264,26 @@ export default function IncomePage() {
 
   // Calculate available values for form preview
   const calculatePreview = () => {
-    if (!formData.totalAudReceived || !formData.founderSalaryAud || !formData.conversionRate || !formData.bankCuts) {
+    if (!formData.totalAudReceived || !formData.founderSalaryAud || !formData.conversionRate || !formData.bankCutsNpr) {
       return null
     }
 
     const totalAud = parseFloat(formData.totalAudReceived)
     const founderSalary = parseFloat(formData.founderSalaryAud)
-    const bankCuts = parseFloat(formData.bankCuts)
+    const bankCutsNpr = parseFloat(formData.bankCutsNpr)
     const conversionRate = parseFloat(formData.conversionRate)
-    
-    const availableAud = totalAud - founderSalary - bankCuts
-    const availableNpr = availableAud * conversionRate
-    
-    const monthSalaries = salaryRecords.filter(
-      r => r.month === formData.month && r.year === formData.year
-    )
-    const totalEmployeeSalariesNpr = monthSalaries.reduce((sum, r) => sum + r.amount, 0)
+
+    const availableAud = totalAud - founderSalary
+    const availableNpr = (availableAud * conversionRate) - bankCutsNpr
+
+    // Calculate employee salaries based on promotion dates and join dates
+    const totalEmployeeSalariesNpr = calculateEmployeeSalariesForMonth(formData.month, formData.year)
     const profitLossAud = (availableNpr - totalEmployeeSalariesNpr) / conversionRate
 
     return {
       availableAud,
       availableNpr,
+      bankCutsNpr,
       totalEmployeeSalariesNpr,
       profitLossAud,
     }
@@ -227,21 +291,20 @@ export default function IncomePage() {
 
   // Filter income records by selected months
   const filteredIncomeRecords = selectedMonths.length > 0
-    ? incomeRecords.filter(record => 
-        selectedMonths.some(m => m.month === record.month && m.year === record.year)
-      )
+    ? incomeRecords.filter(record =>
+      selectedMonths.some(m => m.month === record.month && m.year === record.year)
+    )
     : incomeRecords
 
   // Group data by month/year
   const groupedData = filteredIncomeRecords.map(incomeRecord => {
-    const monthSalaries = salaryRecords.filter(
-      r => r.month === incomeRecord.month && r.year === incomeRecord.year
-    )
-    
-    const employeesWithSalaries = employees.map(emp => {
-      const salary = monthSalaries.find(s => s.employeeId === emp.employeeId)
-      return { employee: emp, salary }
-    }).filter(item => item.salary)
+    // Get employees who joined on or before this month with their calculated salaries
+    const employeesWithSalaries = employees
+      .filter(emp => didEmployeeJoinBeforeMonth(emp, incomeRecord.month, incomeRecord.year))
+      .map(emp => {
+        const salary = getEmployeeSalaryForMonth(emp, incomeRecord.month, incomeRecord.year)
+        return { employee: emp, salary }
+      })
 
     return {
       incomeRecord,
@@ -318,10 +381,9 @@ export default function IncomePage() {
                   </div>
                   <div className="text-right">
                     <p className="text-sm text-gray-600">Profit/Loss</p>
-                    <p className={`text-2xl font-bold ${
-                      incomeRecord.profitLossAud >= 0 ? 'text-green-600' : 'text-red-600'
-                    }`}>
-                      {incomeRecord.profitLossAud >= 0 ? '+' : ''} 
+                    <p className={`text-2xl font-bold ${incomeRecord.profitLossAud >= 0 ? 'text-green-600' : 'text-red-600'
+                      }`}>
+                      {incomeRecord.profitLossAud >= 0 ? '+' : ''}
                       ${incomeRecord.profitLossAud.toFixed(2)} AUD
                     </p>
                   </div>
@@ -363,15 +425,15 @@ export default function IncomePage() {
                     </p>
                   </div>
                   <div>
-                    <p className="text-xs text-gray-600">Bank Cuts</p>
+                    <p className="text-xs text-gray-600">Bank Cuts (NPR)</p>
                     <p className="text-lg font-semibold text-red-600">
-                      -${incomeRecord.bankCuts.toFixed(2)} AUD
+                      -Rs. {incomeRecord.bankCutsNpr.toFixed(2)}
                     </p>
                   </div>
                   <div>
                     <p className="text-xs text-gray-600">Available for Employees</p>
                     <p className="text-lg font-semibold text-blue-600">
-                      Rs. {((incomeRecord.totalAudReceived - incomeRecord.founderSalaryAud - incomeRecord.bankCuts) * incomeRecord.conversionRate).toFixed(2)}
+                      Rs. {(((incomeRecord.totalAudReceived - incomeRecord.founderSalaryAud) * incomeRecord.conversionRate) - incomeRecord.bankCutsNpr).toFixed(2)}
                     </p>
                   </div>
                   <div>
@@ -415,12 +477,12 @@ export default function IncomePage() {
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             <div className="text-sm font-medium text-gray-900">
-                              Rs. {salary!.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              Rs. {salary.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </div>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             <div className="text-sm text-gray-600">
-                              ${(salary!.amount / incomeRecord.conversionRate).toFixed(2)} AUD
+                              ${(salary / incomeRecord.conversionRate).toFixed(2)} AUD
                             </div>
                           </td>
                         </tr>
@@ -430,7 +492,7 @@ export default function IncomePage() {
                 </div>
               ) : (
                 <div className="px-6 py-8 text-center">
-                  <p className="text-gray-500">No employee salaries recorded for this month</p>
+                  <p className="text-gray-500">No employees joined on or before this month</p>
                 </div>
               )}
 
@@ -506,16 +568,17 @@ export default function IncomePage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Bank Cuts/Fees (AUD)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Bank Cuts/Fees (NPR)</label>
                 <input
                   type="number"
                   required
                   step="0.01"
-                  value={formData.bankCuts}
-                  onChange={(e) => setFormData({ ...formData, bankCuts: e.target.value })}
+                  value={formData.bankCutsNpr}
+                  onChange={(e) => setFormData({ ...formData, bankCutsNpr: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                  placeholder="e.g., 200"
+                  placeholder="e.g., 2500"
                 />
+                <p className="text-xs text-gray-500 mt-1">Local bank fees in NPR</p>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Conversion Rate (AUD to NPR)</label>
@@ -537,9 +600,19 @@ export default function IncomePage() {
                   <h3 className="text-sm font-semibold text-gray-900 mb-3">Preview</h3>
                   <div className="space-y-2 text-sm">
                     <div className="flex justify-between">
-                      <span className="text-gray-600">Available for Employees:</span>
+                      <span className="text-gray-600">Conversion (After Founder Salary):</span>
                       <span className="font-medium">
-                        ${calculatePreview()!.availableAud.toFixed(2)} AUD = 
+                        ${calculatePreview()!.availableAud.toFixed(2)} AUD =
+                        Rs. {(calculatePreview()!.availableAud * parseFloat(formData.conversionRate)).toFixed(2)} NPR
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Bank Cuts:</span>
+                      <span className="font-medium text-red-600">-Rs. {calculatePreview()!.bankCutsNpr.toFixed(2)} NPR</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Available for Employees:</span>
+                      <span className="font-medium text-blue-600">
                         Rs. {calculatePreview()!.availableNpr.toFixed(2)} NPR
                       </span>
                     </div>
@@ -549,9 +622,8 @@ export default function IncomePage() {
                     </div>
                     <div className="flex justify-between border-t border-blue-200 pt-2">
                       <span className="text-gray-900 font-semibold">Profit/Loss:</span>
-                      <span className={`font-bold ${
-                        calculatePreview()!.profitLossAud >= 0 ? 'text-green-600' : 'text-red-600'
-                      }`}>
+                      <span className={`font-bold ${calculatePreview()!.profitLossAud >= 0 ? 'text-green-600' : 'text-red-600'
+                        }`}>
                         {calculatePreview()!.profitLossAud >= 0 ? '+' : ''}
                         ${calculatePreview()!.profitLossAud.toFixed(2)} AUD
                       </span>
@@ -588,26 +660,24 @@ export default function IncomePage() {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 max-w-4xl w-full mx-4 max-h-[90vh] overflow-y-auto">
             <h2 className="text-xl font-bold mb-4">Select Months</h2>
-            
+
             {/* Toggle between individual and range */}
             <div className="mb-4 flex space-x-2">
               <button
                 onClick={() => setUseRangeSelector(false)}
-                className={`px-4 py-2 rounded-lg ${
-                  !useRangeSelector
-                    ? 'bg-primary-600 text-white'
-                    : 'bg-gray-200 text-gray-700'
-                }`}
+                className={`px-4 py-2 rounded-lg ${!useRangeSelector
+                  ? 'bg-primary-600 text-white'
+                  : 'bg-gray-200 text-gray-700'
+                  }`}
               >
                 Individual Months
               </button>
               <button
                 onClick={() => setUseRangeSelector(true)}
-                className={`px-4 py-2 rounded-lg ${
-                  useRangeSelector
-                    ? 'bg-primary-600 text-white'
-                    : 'bg-gray-200 text-gray-700'
-                }`}
+                className={`px-4 py-2 rounded-lg ${useRangeSelector
+                  ? 'bg-primary-600 text-white'
+                  : 'bg-gray-200 text-gray-700'
+                  }`}
               >
                 Date Range
               </button>
@@ -629,11 +699,10 @@ export default function IncomePage() {
                           <button
                             key={index}
                             onClick={() => toggleMonthSelection(index + 1, year)}
-                            className={`px-3 py-2 rounded-lg text-sm ${
-                              isSelected
-                                ? 'bg-primary-600 text-white'
-                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                            }`}
+                            className={`px-3 py-2 rounded-lg text-sm ${isSelected
+                              ? 'bg-primary-600 text-white'
+                              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                              }`}
                           >
                             {month}
                           </button>
