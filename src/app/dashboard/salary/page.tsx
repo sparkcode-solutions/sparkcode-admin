@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { getSalaryRecords, createSalaryRecord, getEmployees, getEmployeeById } from '@/lib/firebase'
-import { SalaryRecord, Employee } from '@/lib/firebase'
+import { SalaryRecord, Employee, SalaryItem } from '@/lib/firebase'
 import { downloadPayslip, previewPayslip } from '@/lib/payslip'
 import { format } from 'date-fns'
 
@@ -21,6 +21,7 @@ export default function SalaryPage() {
     year: new Date().getFullYear(),
     amount: '',
     paymentDate: format(new Date(), 'yyyy-MM-dd'),
+    items: [{ description: 'Basic Salary', amount: '' }] as Array<{ description: string; amount: string }>,
   })
   const [backfillData, setBackfillData] = useState({
     employeeId: '',
@@ -58,12 +59,23 @@ export default function SalaryPage() {
       return
     }
 
+    // Convert items to SalaryItem format and calculate total
+    const salaryItems: SalaryItem[] = formData.items
+      .filter(item => item.description.trim() && item.amount)
+      .map(item => ({
+        description: item.description.trim(),
+        amount: parseFloat(item.amount),
+      }))
+
+    const totalAmount = salaryItems.reduce((sum, item) => sum + item.amount, 0)
+
     const result = await createSalaryRecord({
       employeeId: formData.employeeId,
       employeeName: employee.name,
       month: formData.month,
       year: formData.year,
-      amount: parseFloat(formData.amount),
+      amount: totalAmount,
+      items: salaryItems.length > 0 ? salaryItems : undefined,
       paymentDate: formData.paymentDate,
       status: 'paid',
     })
@@ -76,10 +88,42 @@ export default function SalaryPage() {
         year: new Date().getFullYear(),
         amount: '',
         paymentDate: format(new Date(), 'yyyy-MM-dd'),
+        items: [{ description: 'Basic Salary', amount: '' }],
       })
       loadData()
     } else {
       alert(result.error || 'Failed to add salary record')
+    }
+  }
+
+  const addSalaryItem = () => {
+    setFormData({
+      ...formData,
+      items: [...formData.items, { description: '', amount: '' }],
+    })
+  }
+
+  const removeSalaryItem = (index: number) => {
+    if (formData.items.length > 1) {
+      setFormData({
+        ...formData,
+        items: formData.items.filter((_, i) => i !== index),
+      })
+    }
+  }
+
+  const updateSalaryItem = (index: number, field: 'description' | 'amount', value: string) => {
+    const newItems = [...formData.items]
+    newItems[index] = { ...newItems[index], [field]: value }
+    setFormData({ ...formData, items: newItems })
+    
+    // Auto-fill amount if employee is selected and it's the first item
+    if (field === 'description' && index === 0 && value === 'Basic Salary' && formData.employeeId) {
+      const employee = employees.find((e) => e.employeeId === formData.employeeId)
+      if (employee && !newItems[0].amount) {
+        newItems[0].amount = employee.basicSalary.toString()
+        setFormData({ ...formData, items: newItems })
+      }
     }
   }
 
@@ -384,10 +428,19 @@ export default function SalaryPage() {
                             {monthNames[record.month - 1]} {record.year}
                           </div>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
+                        <td className="px-6 py-4">
                           <div className="text-sm font-medium text-gray-900">
                             Rs. {record.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </div>
+                          {record.items && record.items.length > 0 && (
+                            <div className="text-xs text-gray-500 mt-1">
+                              {record.items.map((item, idx) => (
+                                <div key={idx}>
+                                  {item.description}: Rs. {item.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm text-gray-900">
@@ -444,7 +497,7 @@ export default function SalaryPage() {
       {/* Add Salary Record Modal */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+          <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
             <h2 className="text-xl font-bold mb-4">Add Salary Record</h2>
             <form onSubmit={handleAddSalaryRecord} className="space-y-4">
               <div>
@@ -454,10 +507,14 @@ export default function SalaryPage() {
                   value={formData.employeeId}
                   onChange={(e) => {
                     const employee = employees.find((emp) => emp.employeeId === e.target.value)
+                    const newItems = [...formData.items]
+                    if (employee && newItems[0].description === 'Basic Salary' && !newItems[0].amount) {
+                      newItems[0].amount = employee.basicSalary.toString()
+                    }
                     setFormData({
                       ...formData,
                       employeeId: e.target.value,
-                      amount: employee?.basicSalary.toString() || '',
+                      items: newItems,
                     })
                   }}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
@@ -497,17 +554,66 @@ export default function SalaryPage() {
                   />
                 </div>
               </div>
+              
+              {/* Salary Items */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Amount</label>
-                <input
-                  type="number"
-                  required
-                  step="0.01"
-                  value={formData.amount}
-                  onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                />
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-medium text-gray-700">Salary Items</label>
+                  <button
+                    type="button"
+                    onClick={addSalaryItem}
+                    className="text-sm text-primary-600 hover:text-primary-800 font-medium"
+                  >
+                    + Add Item
+                  </button>
+                </div>
+                <div className="space-y-3 border border-gray-200 rounded-lg p-4">
+                  {formData.items.map((item, index) => (
+                    <div key={index} className="flex gap-3 items-start">
+                      <div className="flex-1">
+                        <input
+                          type="text"
+                          placeholder="Description (e.g., Basic Salary, Bonus)"
+                          value={item.description}
+                          onChange={(e) => updateSalaryItem(index, 'description', e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
+                        />
+                      </div>
+                      <div className="w-32">
+                        <input
+                          type="number"
+                          placeholder="Amount"
+                          step="0.01"
+                          value={item.amount}
+                          onChange={(e) => updateSalaryItem(index, 'amount', e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
+                        />
+                      </div>
+                      {formData.items.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removeSalaryItem(index)}
+                          className="px-3 py-2 text-red-600 hover:text-red-800 text-sm"
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  <div className="pt-2 border-t border-gray-200">
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm font-medium text-gray-700">Total:</span>
+                      <span className="text-lg font-bold text-gray-900">
+                        Rs. {formData.items
+                          .filter(item => item.amount)
+                          .reduce((sum, item) => sum + parseFloat(item.amount || '0'), 0)
+                          .toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                  </div>
+                </div>
               </div>
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Payment Date</label>
                 <input
@@ -521,7 +627,17 @@ export default function SalaryPage() {
               <div className="flex space-x-4">
                 <button
                   type="button"
-                  onClick={() => setShowAddModal(false)}
+                  onClick={() => {
+                    setShowAddModal(false)
+                    setFormData({
+                      employeeId: '',
+                      month: new Date().getMonth() + 1,
+                      year: new Date().getFullYear(),
+                      amount: '',
+                      paymentDate: format(new Date(), 'yyyy-MM-dd'),
+                      items: [{ description: 'Basic Salary', amount: '' }],
+                    })
+                  }}
                   className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
                 >
                   Cancel

@@ -52,9 +52,14 @@ const getEmployeeSalaryForMonth = (employee: Employee, month: number, year: numb
 }
 
 export const generatePayslip = async (employee: Employee, salaryRecord: SalaryRecord) => {
-  // Calculate the correct salary based on promotion dates, not the amount in salaryRecord
-  // This ensures payslips show the correct salary even if salary records were backfilled incorrectly
-  const correctSalary = getEmployeeSalaryForMonth(employee, salaryRecord.month, salaryRecord.year)
+  // Calculate the correct salary based on promotion dates for display purposes
+  // But use the actual salary record amount/items for the payslip
+  const calculatedSalary = getEmployeeSalaryForMonth(employee, salaryRecord.month, salaryRecord.year)
+  
+  // Use items total if items exist, otherwise use record amount, fallback to calculated salary
+  const totalAmount = salaryRecord.items && salaryRecord.items.length > 0
+    ? salaryRecord.items.reduce((sum, item) => sum + item.amount, 0)
+    : salaryRecord.amount || calculatedSalary
   
   const doc = new jsPDF()
   
@@ -155,16 +160,49 @@ export const generatePayslip = async (employee: Employee, salaryRecord: SalaryRe
   yPos += 50
   
   // Salary Details Table - Use calculated salary instead of salaryRecord.amount
-  const tableData = [
-    ['EARNINGS', ''],
-    ['Basic Salary', `Rs. ${correctSalary.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`],
-    ['Total Earnings', `Rs. ${correctSalary.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`],
-    ['', ''],
-    ['DEDUCTIONS', ''],
-    ['Total Deductions', 'Rs. 0.00'],
-    ['', ''],
-    ['NET SALARY', `Rs. ${correctSalary.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`],
-  ]
+  // If items exist, show them individually; otherwise show single amount
+  const hasItems = salaryRecord.items && salaryRecord.items.length > 0
+  const tableData: string[][] = []
+  
+  if (hasItems) {
+    // Add EARNINGS header
+    tableData.push(['EARNINGS', ''])
+    
+    // Add each item
+    salaryRecord.items.forEach((item) => {
+      tableData.push([
+        item.description,
+        `Rs. ${item.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+      ])
+    })
+    
+    // Add total earnings
+    tableData.push([
+      'Total Earnings',
+      `Rs. ${totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    ])
+  } else {
+    // Fallback to single amount display
+    tableData.push(['EARNINGS', ''])
+    tableData.push([
+      'Basic Salary',
+      `Rs. ${totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    ])
+    tableData.push([
+      'Total Earnings',
+      `Rs. ${totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    ])
+  }
+  
+  // Add empty row, deductions, and net salary
+  tableData.push(['', ''])
+  tableData.push(['DEDUCTIONS', ''])
+  tableData.push(['Total Deductions', 'Rs. 0.00'])
+  tableData.push(['', ''])
+  tableData.push([
+    'NET SALARY',
+    `Rs. ${totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  ])
   
   autoTable(doc, {
     startY: yPos,
@@ -191,26 +229,30 @@ export const generatePayslip = async (employee: Employee, salaryRecord: SalaryRe
     },
     didParseCell: (data: any) => {
       // Note: data.row.index includes the header row, so body rows start at index 1
-      // Row indices: 0=header, 1=EARNINGS, 2=Basic Salary, 3=Total Earnings, 4=empty, 
-      //              5=DEDUCTIONS, 6=Total Deductions, 7=empty, 8=NET SALARY
+      // Row indices vary based on number of items
+      const rowIndex = data.row.index
+      const earningsHeaderIndex = 0
+      const totalEarningsIndex = hasItems ? salaryRecord.items!.length + 1 : 2
+      const deductionsHeaderIndex = totalEarningsIndex + 2
+      const netSalaryIndex = tableData.length - 1
       
-      // Style EARNINGS and Total Earnings rows (rows 1 and 3)
-      if (data.row.index === 1 || data.row.index === 3) {
+      // Style EARNINGS header and Total Earnings rows
+      if (rowIndex === earningsHeaderIndex || rowIndex === totalEarningsIndex) {
         data.cell.styles.fontStyle = 'bold'
       }
-      // Style net salary row (row 8)
-      if (data.row.index === 8) {
+      // Style net salary row
+      if (rowIndex === netSalaryIndex) {
         data.cell.styles.fillColor = [212, 237, 218]
         data.cell.styles.fontStyle = 'bold'
         data.cell.styles.fontSize = 12
         data.cell.styles.textColor = [0, 0, 0] // Ensure text is black on green background
       }
-      // Style empty rows (rows 4 and 7)
-      if (data.row.index === 4 || data.row.index === 7) {
+      // Style empty rows
+      if (rowIndex === totalEarningsIndex + 1 || rowIndex === netSalaryIndex - 1) {
         data.cell.styles.fillColor = [255, 255, 255]
       }
-      // Style DEDUCTIONS row (row 5)
-      if (data.row.index === 5) {
+      // Style DEDUCTIONS header
+      if (rowIndex === deductionsHeaderIndex) {
         data.cell.styles.fontStyle = 'bold'
       }
     },

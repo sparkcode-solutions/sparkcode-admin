@@ -1,6 +1,6 @@
-import { Employee, Promotion, SalaryRecord, IncomeRecord } from '@/lib/firebase'
+import { Employee, Promotion, SalaryRecord, IncomeRecord, SalaryItem, EmployeePayment } from '@/lib/firebase'
 
-export type { Employee, Promotion, SalaryRecord, IncomeRecord }
+export type { Employee, Promotion, SalaryRecord, IncomeRecord, SalaryItem, EmployeePayment }
 
 export interface CompanyInfo {
   name: string

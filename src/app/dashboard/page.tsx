@@ -1,23 +1,31 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { getEmployees, calculateDaysSinceJoined } from '@/lib/firebase'
-import { Employee } from '@/lib/firebase'
+import { getEmployees, calculateDaysSinceJoined, getIncomeRecords } from '@/lib/firebase'
+import { Employee, IncomeRecord } from '@/lib/firebase'
 import Link from 'next/link'
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 
 export default function DashboardPage() {
   const [employees, setEmployees] = useState<Employee[]>([])
+  const [incomeRecords, setIncomeRecords] = useState<IncomeRecord[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    loadEmployees()
+    loadData()
   }, [])
 
-  const loadEmployees = async () => {
+  const loadData = async () => {
     setLoading(true)
-    const result = await getEmployees()
-    if (result.success && result.data) {
-      setEmployees(result.data)
+    const [employeesResult, incomeResult] = await Promise.all([
+      getEmployees(),
+      getIncomeRecords(),
+    ])
+    if (employeesResult.success && employeesResult.data) {
+      setEmployees(employeesResult.data)
+    }
+    if (incomeResult.success && incomeResult.data) {
+      setIncomeRecords(incomeResult.data)
     }
     setLoading(false)
   }
@@ -35,6 +43,19 @@ export default function DashboardPage() {
         )
       : 0,
   }
+
+  // Prepare chart data for profit/loss
+  const chartData = incomeRecords
+    .sort((a, b) => {
+      if (a.year !== b.year) return a.year - b.year
+      return a.month - b.month
+    })
+    .map(record => ({
+      month: `${new Date(record.year, record.month - 1).toLocaleString('default', { month: 'short' })} ${record.year}`,
+      profitLossNpr: record.profitLossNpr || 0,
+      profitLossAud: record.profitLossAud || 0,
+      profitLossUsd: record.profitLossUsd || 0,
+    }))
 
   if (loading) {
     return (
@@ -109,6 +130,50 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {/* Profit/Loss Charts */}
+      {chartData.length > 0 && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+          <div className="bg-white rounded-lg shadow p-6">
+            <h2 className="text-xl font-bold text-gray-900 mb-4">Profit/Loss Trend (NPR)</h2>
+            <ResponsiveContainer width="100%" height={300}>
+              <LineChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="month" angle={-45} textAnchor="end" height={80} />
+                <YAxis />
+                <Tooltip formatter={(value: number) => `Rs. ${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} />
+                <Legend />
+                <Line 
+                  type="monotone" 
+                  dataKey="profitLossNpr" 
+                  stroke="#3b82f6" 
+                  strokeWidth={2}
+                  name="Profit/Loss (NPR)"
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+
+          <div className="bg-white rounded-lg shadow p-6">
+            <h2 className="text-xl font-bold text-gray-900 mb-4">Profit/Loss Comparison</h2>
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="month" angle={-45} textAnchor="end" height={80} />
+                <YAxis />
+                <Tooltip formatter={(value: number, name: string) => {
+                  if (name === 'profitLossAud') return `$${value.toFixed(2)} AUD`
+                  if (name === 'profitLossUsd') return `$${value.toFixed(2)} USD`
+                  return `Rs. ${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                }} />
+                <Legend />
+                <Bar dataKey="profitLossAud" fill="#10b981" name="Profit/Loss (AUD)" />
+                <Bar dataKey="profitLossUsd" fill="#f59e0b" name="Profit/Loss (USD)" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
 
       {/* Recent Employees */}
       <div className="bg-white rounded-lg shadow">

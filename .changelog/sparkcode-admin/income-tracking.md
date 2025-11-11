@@ -91,3 +91,39 @@ const profitLossAud = (availableNpr - totalEmployeeSalariesNpr) / conversionRate
 - AuthContext for user authentication and founder identification
 - date-fns for date formatting
 
+## 2025-01-27
+
+### Files Changed
+- src/lib/firebase.ts
+- src/app/dashboard/income/page.tsx
+- src/app/dashboard/page.tsx
+- src/types/index.ts
+- package.json
+
+### Feature
+Income Record Modal - Enhanced with multi-currency support and employee payments tracking
+
+### Summary
+Enhanced the income record modal to support multiple currency types (AUD, USD, NPR) with comprehensive profit/loss calculations. Added support for tracking employee payments with individual amounts and charges. Implemented automatic calculation of hidden bank cuts and profit/loss in all three currencies.
+
+Key changes:
+- Added new fields: `originalAudSalary`, `usdAmount`, `usdRate`, `nprReceived`, `bankCutsKnown`, `bankCutsHidden`, `employeePayments[]`
+- Added profit/loss calculations in NPR, AUD, and USD
+- Added employee payments section with dynamic rows for name, amount, and charges
+- Added profit/loss charts to dashboard (line chart for NPR trend, bar chart for AUD/USD comparison)
+- Maintained backward compatibility with legacy income record format
+
+```ts
++ export interface EmployeePayment {
++   employeeName: string;
++   amount: number;
++   charges: number;
++ }
+```
+
+### Affected Components
+- `IncomeRecord` interface (new fields added)
+- Income modal form (completely redesigned)
+- Dashboard page (added profit/loss charts using recharts)
+- Income record display (updated to show new fields)
+

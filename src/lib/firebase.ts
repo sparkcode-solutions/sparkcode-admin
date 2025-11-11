@@ -141,28 +141,50 @@ export interface Promotion {
   createdAt?: Timestamp | Date;
 }
 
+export interface SalaryItem {
+  description: string;
+  amount: number;
+}
+
 export interface SalaryRecord {
   id?: string;
   employeeId: string;
   employeeName: string;
   month: number;
   year: number;
-  amount: number;
+  amount: number; // Total amount (for backward compatibility and quick access)
+  items?: SalaryItem[]; // Line items with descriptions
   paymentDate: string;
   status: 'paid' | 'pending';
   createdAt?: Timestamp | Date;
+}
+
+export interface EmployeePayment {
+  employeeName: string;
+  amount: number;
+  charges: number;
 }
 
 export interface IncomeRecord {
   id?: string;
   month: number;
   year: number;
-  totalAudReceived: number;
-  founderSalaryAud: number;
-  conversionRate: number; // AUD to NPR
-  bankCutsNpr: number; // in NPR (local bank fees)
-  totalEmployeeSalariesNpr: number;
-  profitLossAud: number;
+  originalAudSalary: number; // Original AUD salary
+  usdAmount: number; // USD amount
+  usdRate: number; // USD rate (manual entry)
+  nprReceived: number; // NPR received money
+  bankCutsKnown: number; // Known bank cuts
+  bankCutsHidden: number; // Hidden bank cuts (calculated: actual converted NPR - received NPR)
+  employeePayments: EmployeePayment[]; // Array of employee payments with name, amount, charges
+  profitLossNpr: number; // Profit/Loss in NPR
+  profitLossAud: number; // Profit/Loss in AUD
+  profitLossUsd: number; // Profit/Loss in USD
+  // Legacy fields for backward compatibility
+  totalAudReceived?: number;
+  founderSalaryAud?: number;
+  conversionRate?: number; // AUD to NPR
+  bankCutsNpr?: number; // in NPR (local bank fees)
+  totalEmployeeSalariesNpr?: number;
   createdAt?: Timestamp | Date;
   updatedAt?: Timestamp | Date;
 }
@@ -297,8 +319,15 @@ export const addPromotion = async (employeeId: string, promotion: Omit<Promotion
 // Salary record operations
 export const createSalaryRecord = async (record: Omit<SalaryRecord, 'id'>) => {
   try {
+    // Calculate total amount from items if items are provided
+    let totalAmount = record.amount
+    if (record.items && record.items.length > 0) {
+      totalAmount = record.items.reduce((sum, item) => sum + item.amount, 0)
+    }
+    
     const docRef = await addDoc(collection(db, collections.salaryRecords), {
       ...record,
+      amount: totalAmount, // Ensure amount is always set (either provided or calculated)
       createdAt: serverTimestamp(),
     });
     return { success: true, id: docRef.id };
