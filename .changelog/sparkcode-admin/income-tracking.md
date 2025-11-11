@@ -127,3 +127,5 @@ Key changes:
 - Dashboard page (added profit/loss charts using recharts)
 - Income record display (updated to show new fields)
 
+### Update 2025-01-27
+Changed employee name input in employee payments section to dropdown select populated from employees list

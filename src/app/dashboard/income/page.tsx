@@ -785,13 +785,19 @@ export default function IncomePage() {
                     formData.employeePayments.map((payment, index) => (
                       <div key={index} className="grid grid-cols-12 gap-3 items-start">
                         <div className="col-span-4">
-                          <input
-                            type="text"
-                            placeholder="Employee Name"
+                          <select
+                            required
                             value={payment.employeeName}
                             onChange={(e) => updateEmployeePayment(index, 'employeeName', e.target.value)}
                             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
-                          />
+                          >
+                            <option value="">Select Employee</option>
+                            {employees.map((employee) => (
+                              <option key={employee.id} value={employee.name}>
+                                {employee.name} ({employee.employeeId})
+                              </option>
+                            ))}
+                          </select>
                         </div>
                         <div className="col-span-3">
                           <input
