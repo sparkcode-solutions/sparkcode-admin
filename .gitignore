@@ -38,3 +38,5 @@ next-env.d.ts
 # logos (keep original, but public folder will be deployed)
 # logos/
 
+public/salary-import.json
+public/employees-import.json
